@@ -4,9 +4,9 @@
 
 #include "../lib/socketUtil.h"
 
-void startListeningAndPrintMessagesOnNewThread(int);
+void startListeningAndPrintMessagesOnNewThread(int socketFD);
 
-void listenAndPrint(int);
+void listenAndPrint(int socketFDArg);
 
 void startListeningAndPrintMessagesOnNewThread(int socketFD)
 {

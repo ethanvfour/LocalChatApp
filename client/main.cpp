@@ -1,24 +1,26 @@
 #include <iostream>
-#include <pthread.h>
+#include <thread>
 #include <unistd.h>
 
 #include "../lib/socketUtil.h"
 
 void startListeningAndPrintMessagesOnNewThread(int);
 
-void* listenAndPrint(void *);
+void listenAndPrint(int);
 
 void startListeningAndPrintMessagesOnNewThread(int socketFD)
 {
-    int * j = new int(socketFD);
-    pthread_t id;
-    pthread_create(&id, NULL, listenAndPrint, j);    
+    // int * j = new int(socketFD);
+    // pthread_t id;
+    // pthread_create(&id, NULL, listenAndPrint, j); 
+    
+    std::thread t(listenAndPrint, socketFD);
+    t.detach();
 }
 
-void* listenAndPrint(void* socketFDArg)
+void listenAndPrint(int socketFDArg)
 {
-    int socketFD = *static_cast<int *>(socketFDArg);
-    delete (int *)socketFDArg;
+    int socketFD = socketFDArg;
     char buffer[1024] = {0};
     while (true)
     {
@@ -40,8 +42,6 @@ void* listenAndPrint(void* socketFDArg)
         std::fill(std::begin(buffer), std::end(buffer), 0);
     }
     close(socketFD);
-
-    return nullptr;
 }
 
 
@@ -66,7 +66,7 @@ int main()
     }
     else
     {
-        std::cerr << "fak" << std::endl;
+        std::cerr << "Connection failed!\n";
         return 1;
     }
     std::string name;

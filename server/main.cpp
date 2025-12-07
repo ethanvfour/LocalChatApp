@@ -1,6 +1,6 @@
 #include <iostream>
 #include <unistd.h>
-#include <pthread.h>
+#include <thread>
 #include <array>
 #include "../lib/socketUtil.h";
 #include <mutex>
@@ -19,7 +19,7 @@ std::mutex acceptedSocketsMutex;
 
 void receiveAndPrintIncomingDataOnSeperateThread(const AcceptedSocket *clientSide);
 
-void *receiveAndPrintIncomingData(void *socketFd);
+void receiveAndPrintIncomingData(int socketFd);
 
 AcceptedSocket *acceptIncomingConnection(int serverSocketFD);
 
@@ -29,11 +29,10 @@ void sendReceiveMessageToTheOtherClients(const char *buffer, int serverSocketFD)
 
 void getRidOfFDFromAcceptedSockets(int serverSocketFD){}
 
-void *receiveAndPrintIncomingData(void *socketFd)
+void receiveAndPrintIncomingData(int socketFd)
 {
 
-    int serverSocketFD = *static_cast<int *>(socketFd);
-    delete (int *)socketFd;
+    int serverSocketFD = socketFd;
 
     char buffer[1024] = {0};
     while (true)
@@ -58,8 +57,6 @@ void *receiveAndPrintIncomingData(void *socketFd)
         std::fill(std::begin(buffer), std::end(buffer), 0);
     }
     close(serverSocketFD);
-
-    return nullptr;
 }
 
 AcceptedSocket *acceptIncomingConnection(int serverSocketFD)
@@ -97,9 +94,12 @@ void startAcceptingIncomingConnections(int serverSocketFD)
 
 void receiveAndPrintIncomingDataOnSeperateThread(const AcceptedSocket *clientSide)
 {
-    pthread_t id;
-    int *arg = new int(clientSide->accpetedSocketFD);
-    pthread_create(&id, NULL, receiveAndPrintIncomingData, arg);
+    // pthread_t id;
+    // int *arg = new int(clientSide->accpetedSocketFD);
+    // pthread_create(&id, NULL, receiveAndPrintIncomingData, arg);
+
+    std::thread t1(receiveAndPrintIncomingData, clientSide->accpetedSocketFD);
+    t1.detach();
 }
 
 void sendReceiveMessageToTheOtherClients(const char *buffer, int serverSocketFD)

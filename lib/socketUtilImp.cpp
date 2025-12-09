@@ -5,9 +5,9 @@ int createTCPIPv4Socket()
     return socket(AF_INET, SOCK_STREAM, 0);
 }
 
-sockaddr_in* createIPv4Address(const char * ip, int portNum)
+std::unique_ptr<sockaddr_in> createIPv4Address(const char * ip, int portNum)
 {
-    sockaddr_in* address = new sockaddr_in;
+    std::unique_ptr<sockaddr_in> address = std::make_unique<sockaddr_in>();
     
     // Specify the address family (IPv4)
     address->sin_family = AF_INET;

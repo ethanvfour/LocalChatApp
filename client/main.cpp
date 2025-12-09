@@ -27,17 +27,13 @@ void listenAndPrint(int socketFDArg)
         ssize_t amtRecieved = recv(socketFD, buffer, 1024, 0);
         if (amtRecieved > 0)
         {
-            std::cout << "Response was: " << buffer << std::endl;
+            std::cout << buffer << std::endl;
         }
-
-        if (amtRecieved == 0)
+        else
         {
-            std::cout << "Client stopped connection!\n";
+            std::cout << "Server stopped connection!\n";
             break;
         }
-
-        if (amtRecieved < 0)
-            break;
 
         std::fill(std::begin(buffer), std::end(buffer), 0);
     }
@@ -54,11 +50,11 @@ int main()
         return 1;
     }
     
-    sockaddr_in *address = createIPv4Address("127.0.0.1", 2000);
+    std::unique_ptr<sockaddr_in> address = createIPv4Address("127.0.0.1", 2000);
     
     // Convert the IP address from text to binary form
     
-    int result = connect(socketFD, (const sockaddr *)address, sizeof *address);
+    int result = connect(socketFD, (const sockaddr *)address.get(), sizeof *address);
     
     if (result == 0)
     {
@@ -78,6 +74,14 @@ int main()
     std::string msgConsole;
     std::cout << "send some messages to host (\"exit\" to stop program)" << std::endl;
 
+    {   //sanitize input, no " or :
+        std::string newName = "";
+        for(char c : name)
+            if(c != '"' || c != ':')
+                newName += c;
+        name = newName;
+    }
+
     startListeningAndPrintMessagesOnNewThread(socketFD);
 
     while (true)
@@ -85,7 +89,11 @@ int main()
         getline(std::cin, msgConsole);
         if (msgConsole == "exit")
             break;
-        msgConsole = name + ":" + msgConsole;
+        
+        
+        
+        msgConsole = name + " : " + msgConsole;
+        std::cout<<msgConsole<<std::endl;
         ssize_t amountThatWasSent = send(socketFD, msgConsole.c_str(), msgConsole.length(), 0);
         if (amountThatWasSent <= 0)
         {
@@ -95,6 +103,5 @@ int main()
     }
     close(socketFD);
 
-    delete address;
     return 0;
 }

@@ -11,6 +11,6 @@
 
 int createTCPIPv4Socket();
 
-sockaddr_in * createIPv4Address(const char * ip, int portNum);
+std::unique_ptr<sockaddr_in> createIPv4Address(const char * ip, int portNum);
 
 #endif

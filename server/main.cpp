@@ -23,6 +23,7 @@ constexpr size_t MAX_CONNECTIONS = 10;
 // Define the max message size the server/client can take or send
 constexpr size_t MAX_BUFFER_SIZE = 1024;
 
+// Vector that holds all accepted connections
 std::vector<std::unique_ptr<AcceptedSocket>> acceptedSockets;
 
 std::mutex acceptedSocketsMutex;
@@ -172,7 +173,7 @@ void receiveAndPrintIncomingData(int serverSocketFD)
     while (true)
     {
         ssize_t amtRecieved = recv(serverSocketFD, buffer, MAX_BUFFER_SIZE, 0);
-
+        buffer[amtRecieved] = '\0';
         if (amtRecieved > 0)
         {
             std::cout << buffer << std::endl;

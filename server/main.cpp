@@ -3,10 +3,15 @@
 int main()
 {
     acceptedSockets.reserve(MAX_CONNECTIONS);
-    for (int i = 0; i < MAX_CONNECTIONS; i++)
-        acceptedSockets.push_back(nullptr);
-
+    
     int serverSocketFD{createTCPIPv4Socket()};
+
+    if(serverSocketFD <= 0)
+    {
+        std::cerr << "Could not create socket!\n";
+        return 1;
+    }
+
     std::unique_ptr<sockaddr_in> address = createIPv4Address("", 2000);
 
     int result{bind(serverSocketFD, (const sockaddr *)address.get(), sizeof *address)};

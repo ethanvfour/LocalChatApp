@@ -1,21 +1,24 @@
 #include "server.h"
 
+// Define the max message size the server/client can take or send
+static constexpr size_t MAX_BUFFER_SIZE = 1024;
+
 // Global variable definitions
-std::vector<std::unique_ptr<AcceptedSocket>> acceptedSockets;
+std::unordered_map<int, std::unique_ptr<AcceptedSocket>> acceptedSockets;
 std::mutex acceptedSocketsMutex;
 std::atomic<bool> serverDone{false};
+std::unordered_map<std::string, int> nameToFd;
 
-bool specialCommands(std::string_view j, const int serverSocketFD)
+bool handleCommand(std::string_view j, const int clientSocketFD)
 {
     bool foundCommand{false};
-
-    std::string msg(j.substr(j.find(':') + 2));
+    std::string_view msg{j.substr(j.find(':') + 2)};
 
     auto tokenize = [&msg]() -> std::vector<std::string>
     {
         std::vector<std::string> returner;
         std::string curr;
-        for (auto c : msg)
+        for (auto &c : msg)
         {
             if (c == ' ' && !curr.empty())
             {
@@ -23,9 +26,7 @@ bool specialCommands(std::string_view j, const int serverSocketFD)
                 curr.clear();
             }
             else
-            {
                 curr += c;
-            }
         }
         if (!curr.empty())
             returner.push_back(curr);
@@ -41,14 +42,16 @@ bool specialCommands(std::string_view j, const int serverSocketFD)
     {
         foundCommand = true;
         std::lock_guard<std::mutex> lock(acceptedSocketsMutex);
-        std::string sender = "Connected users: \n";
-        for (const auto &curr : acceptedSockets)
-            if (curr && !curr.get()->name.empty())
-                sender += curr.get()->name +
-                          (curr.get()->acceptedSocketFD == serverSocketFD ? " (You) " : "") +
+        std::string sender{*"Connected users: \n"};
+
+        for (const auto &[_, ptr] : acceptedSockets)
+            if (ptr && !ptr.get()->name.empty())
+                sender += ptr.get()->name +
+                          (ptr.get()->acceptedSocketFD == clientSocketFD ? " (You) "
+                                                                         : "") +
                           "\n";
 
-        if (send(serverSocketFD, sender.c_str(), sender.length(), 0) <= 0)
+        if (send(clientSocketFD, sender.c_str(), sender.length(), 0) <= 0)
             std::cerr << "Failed to send all users!\n";
     }
     else if (tokens[0] == "/msg")
@@ -57,91 +60,96 @@ bool specialCommands(std::string_view j, const int serverSocketFD)
         if (tokens.size() < 3)
         {
             const std::string errorMsg{"/help for correct syntax of sending message\n"};
-            if (send(serverSocketFD, errorMsg.c_str(), errorMsg.length(), 0) <= 0)
+            if (send(clientSocketFD, errorMsg.c_str(), errorMsg.length(), 0) <= 0)
                 std::cerr << "Could not send to user!\n";
+            return true;
         }
+
         std::lock_guard<std::mutex> lock(acceptedSocketsMutex);
         std::string userToSendTo{tokens[1]};
-        std::string msg = " (PM) ";
+        std::string messageToSend = " (PM) ";
         for (size_t i = 2; i < tokens.size(); i++)
-            msg.append(" " + tokens[i]);
+            messageToSend.append(" " + tokens[i]);
 
-        auto user = std::find_if(acceptedSockets.begin(),
-                                 acceptedSockets.end(),
-                                 [&userToSendTo](auto &curr)
-                                 {
-                                     return curr && curr.get()->name == userToSendTo;
-                                 });
-        if (user == acceptedSockets.end())
+        if (auto it = nameToFd.find(userToSendTo);
+            it == nameToFd.end() ||
+            acceptedSockets.find(it->second) == acceptedSockets.end() ||
+            !acceptedSockets[it->second])
         {
             std::string failedToFindUser = "Could not find user with name : " + userToSendTo + "!\n";
-            if (send(serverSocketFD, failedToFindUser.c_str(), failedToFindUser.length(), 0) <= 0)
+            if (send(clientSocketFD, failedToFindUser.c_str(), failedToFindUser.length(), 0) <= 0)
                 std::cerr << "Could not send error msg!\n";
         }
-        else if (send(user->get()->acceptedSocketFD, msg.c_str(), msg.length(), 0) <= 0)
-            std::cerr << "Failed to send all private msg!\n";
+        else if (send(acceptedSockets[it->second]->acceptedSocketFD,
+                      messageToSend.c_str(),
+                      messageToSend.length(), 0) <= 0)
+            std::cerr
+                << "Failed to send private msg!\n";
+    }
+    else if (tokens[0] == "/name")
+    {
+        foundCommand = true;
+        std::lock_guard<std::mutex> lock(acceptedSocketsMutex);
+        bool nameChanged = false;
     }
 
     return foundCommand;
 }
 
-void getRidOfFDFromAcceptedSockets(int serverSocketFD)
+void getRidOfFDFromAcceptedSockets(int clientSocketFD)
 {
     std::lock_guard<std::mutex> lock(acceptedSocketsMutex);
-    if (auto it = std::find_if(acceptedSockets.begin(),
-                               acceptedSockets.end(),
-                               [serverSocketFD](auto &curr)
-                               {
-                                   return curr && curr.get()->acceptedSocketFD == serverSocketFD;
-                               });
-        it != acceptedSockets.end())
-    {
-        std::cout << "Removing user \"" << it->get()->name << "\"" << std::endl;
-        it->reset();
-    }
-    else
+
+    if (auto it = acceptedSockets.find(clientSocketFD);
+        it == acceptedSockets.end() ||
+        !it->second)
     {
         std::cerr << "Could not find server socket to get rid of!\n";
     }
+    else
+    {
+        auto &socket = it->second;
+        std::cout << "Removing user \"" << socket->name << "\"" << std::endl;
+
+        nameToFd.erase(socket->name);
+        acceptedSockets.erase(it);
+    }
 }
 
-void receiveAndPrintIncomingData(int serverSocketFD)
+void receiveAndPrintIncomingData(const int clientSocketFD)
 {
     bool userNameFound{false};
 
     char buffer[MAX_BUFFER_SIZE]{};
     while (true)
     {
-        ssize_t amtRecieved = recv(serverSocketFD, buffer, MAX_BUFFER_SIZE, 0);
+        ssize_t amtRecieved = recv(clientSocketFD, buffer, MAX_BUFFER_SIZE, 0);
 
         if (amtRecieved > 0)
         {
             buffer[amtRecieved] = '\0';
             std::cout << buffer << std::endl;
 
-            if (!specialCommands(std::string(buffer), serverSocketFD))
+            if (!handleCommand(std::string(buffer), clientSocketFD))
             {
-                sendReceiveMessageToTheOtherClients(buffer, serverSocketFD);
+                sendReceiveMessageToTheOtherClients(buffer, clientSocketFD);
             }
             if (!userNameFound)
             {
                 std::lock_guard<std::mutex> lock(acceptedSocketsMutex);
+                std::string name = std::string(buffer).substr(0, name.find(':') - 1);
 
-                auto it = std::find_if(acceptedSockets.begin(),
-                                       acceptedSockets.end(),
-                                       [serverSocketFD](auto &curr)
-                                       {
-                                           return curr.get()->acceptedSocketFD == serverSocketFD;
-                                       });
-
-                std::string name(buffer);
-                if (it == acceptedSockets.end())
+                if (auto it = acceptedSockets.find(clientSocketFD);
+                    it != acceptedSockets.end())
                 {
-                    std::cerr << "Could not initiazlie user name!\n";
+                    auto &socket = it->second;
+                    socket->name = name;
+                    nameToFd[name] = clientSocketFD;
                 }
-
-                it->get()->name = name.substr(0, name.find(':') - 1);
-                userNameFound = true;
+                else
+                {
+                    std::cerr << "Failed to set username! Name to be intialized : " << name << "\n";
+                }
             }
         }
         else
@@ -152,8 +160,8 @@ void receiveAndPrintIncomingData(int serverSocketFD)
 
         std::fill(std::begin(buffer), std::end(buffer), 0);
     }
-    close(serverSocketFD);
-    getRidOfFDFromAcceptedSockets(serverSocketFD);
+    close(clientSocketFD);
+    getRidOfFDFromAcceptedSockets(clientSocketFD);
 }
 
 std::unique_ptr<AcceptedSocket> acceptIncomingConnection(int serverSocketFD)
@@ -195,22 +203,16 @@ void startAcceptingIncomingConnections(int serverSocketFD)
         }
 
         std::lock_guard<std::mutex> lock(acceptedSocketsMutex);
-        auto spot = std::find_if(acceptedSockets.begin(),
-                                 acceptedSockets.end(),
-                                 [](auto &curr)
-                                 {
-                                     return !curr;
-                                 });
 
-        if (spot == acceptedSockets.end())
+        if (acceptedSockets.size() == MAX_CONNECTIONS)
         {
             std::cerr << "Could not find an open connection!\n";
             close(accepted->acceptedSocketFD);
             continue;
         }
-
-        *spot = std::move(accepted);
-        receiveAndPrintIncomingDataOnSeperateThread(spot->get()->acceptedSocketFD);
+        int clientFD{accepted->acceptedSocketFD};
+        acceptedSockets[clientFD] = std::move(accepted);
+        receiveAndPrintIncomingDataOnSeperateThread(clientFD);
     }
 }
 
@@ -220,15 +222,15 @@ void receiveAndPrintIncomingDataOnSeperateThread(const int socketFD)
     t1.detach();
 }
 
-void sendReceiveMessageToTheOtherClients(const char *buffer, int serverSocketFD)
+void sendReceiveMessageToTheOtherClients(const char *buffer, int clientSockedFD)
 {
     std::lock_guard<std::mutex> lock(acceptedSocketsMutex);
-    for (int i = 0; i < acceptedSockets.size(); i++)
-        if (acceptedSockets[i] && acceptedSockets[i].get()->acceptedSocketFD != serverSocketFD)
-        {
-            if (send(acceptedSockets[i].get()->acceptedSocketFD, buffer, strlen(buffer), 0) == -1)
-                std::cerr << "Could not send message to one of the users!\n";
-        }
+
+    for (const auto &[socketFD, ptr] : acceptedSockets)
+        if (ptr && socketFD != clientSockedFD)
+            if (send(socketFD, buffer, strlen(buffer), 0) == 0)
+                std::cerr << "Could not send message to user : " << ptr->name << "\n";
+    
 }
 
 void serverStopper(int serverSocketFD)

@@ -21,14 +21,15 @@ struct AcceptedSocket
     std::string name;
 };
 
+// Vector that holds all accepted connections
+//extern std::vector<std::unique_ptr<AcceptedSocket>> acceptedSockets;
+
 // Defines the max connections the server can take in
 constexpr size_t MAX_CONNECTIONS = 10;
 
-// Define the max message size the server/client can take or send
-constexpr size_t MAX_BUFFER_SIZE = 1024;
+extern std::unordered_map<int, std::unique_ptr<AcceptedSocket>> acceptedSockets;
 
-// Vector that holds all accepted connections
-extern std::vector<std::unique_ptr<AcceptedSocket>> acceptedSockets;
+extern std::unordered_map<std::string, int> nameToFd;
 
 extern std::mutex acceptedSocketsMutex;
 
@@ -46,7 +47,7 @@ void sendReceiveMessageToTheOtherClients(const char *buffer, int serverSocketFD)
 
 void getRidOfFDFromAcceptedSockets(int serverSocketFD);
 
-bool specialCommands(std::string_view j, const int serverSocketFD);
+bool handleCommand(std::string_view j, const int clientSockedFD);
 
 void serverStopper(int serverSocketFD);
 

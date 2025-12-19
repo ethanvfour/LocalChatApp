@@ -42,12 +42,12 @@ bool handleCommand(std::string_view j, const int clientSocketFD)
     {
         foundCommand = true;
         std::lock_guard<std::mutex> lock(acceptedSocketsMutex);
-        std::string sender{*"Connected users: \n"};
+        std::string sender{"Connected users: \n"};
 
         for (const auto &[_, ptr] : acceptedSockets)
-            if (ptr && !ptr.get()->name.empty())
-                sender += ptr.get()->name +
-                          (ptr.get()->acceptedSocketFD == clientSocketFD ? " (You) "
+            if (ptr && !ptr->name.empty())
+                sender += ptr->name +
+                          (ptr->acceptedSocketFD == clientSocketFD ? " (You) "
                                                                          : "") +
                           "\n";
 
@@ -71,18 +71,17 @@ bool handleCommand(std::string_view j, const int clientSocketFD)
         for (size_t i = 2; i < tokens.size(); i++)
             messageToSend.append(" " + tokens[i]);
 
-        if (auto it = nameToFd.find(userToSendTo);
-            it == nameToFd.end() ||
-            acceptedSockets.find(it->second) == acceptedSockets.end() ||
-            !acceptedSockets[it->second])
+        auto itName = nameToFd.find(userToSendTo);
+        auto itAcc = (itName == nameToFd.end()) ? acceptedSockets.end() : acceptedSockets.find(itName->second);
+        if (itName == nameToFd.end() ||
+            itAcc == acceptedSockets.end() ||
+            !itAcc->second)
         {
             std::string failedToFindUser = "Could not find user with name : " + userToSendTo + "!\n";
             if (send(clientSocketFD, failedToFindUser.c_str(), failedToFindUser.length(), 0) <= 0)
                 std::cerr << "Could not send error msg!\n";
         }
-        else if (send(acceptedSockets[it->second]->acceptedSocketFD,
-                      messageToSend.c_str(),
-                      messageToSend.length(), 0) <= 0)
+        else if (send(itAcc->second->acceptedSocketFD, messageToSend.c_str(), messageToSend.length(), 0) <= 0)
             std::cerr
                 << "Failed to send private msg!\n";
     }
@@ -123,7 +122,7 @@ void receiveAndPrintIncomingData(const int clientSocketFD)
     char buffer[MAX_BUFFER_SIZE]{};
     while (true)
     {
-        ssize_t amtRecieved = recv(clientSocketFD, buffer, MAX_BUFFER_SIZE, 0);
+        ssize_t amtRecieved = recv(clientSocketFD, buffer, MAX_BUFFER_SIZE - 1, 0);
 
         if (amtRecieved > 0)
         {
@@ -136,8 +135,11 @@ void receiveAndPrintIncomingData(const int clientSocketFD)
             }
             if (!userNameFound)
             {
+                userNameFound = true;
                 std::lock_guard<std::mutex> lock(acceptedSocketsMutex);
-                std::string name = std::string(buffer).substr(0, name.find(':') - 1);
+                std::string_view tmp{buffer};
+                auto colon = tmp.find(':');
+                std::string name{tmp.substr(0, colon - 1)};
 
                 if (auto it = acceptedSockets.find(clientSocketFD);
                     it != acceptedSockets.end())
@@ -228,9 +230,8 @@ void sendReceiveMessageToTheOtherClients(const char *buffer, int clientSockedFD)
 
     for (const auto &[socketFD, ptr] : acceptedSockets)
         if (ptr && socketFD != clientSockedFD)
-            if (send(socketFD, buffer, strlen(buffer), 0) == 0)
+            if (send(socketFD, buffer, strlen(buffer), 0) <= 0)
                 std::cerr << "Could not send message to user : " << ptr->name << "\n";
-    
 }
 
 void serverStopper(int serverSocketFD)
